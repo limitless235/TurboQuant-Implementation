@@ -95,44 +95,109 @@ class TurboQuantMSE:
         boundaries : np.ndarray
             Decision boundaries of shape (2^bit_width - 1,).
         """
+        n_centroids = 2 ** bit_width
+
+        # Try to load from file first
         try:
-            from core.codebook import load_codebook
-            centroids, boundaries = load_codebook(d, bit_width)
-        except ImportError:
-            # Fallback: generate using Lloyd-Max if core module not available
-            from scipy.special import gamma
-            from scipy.integrate import quad
+            import pickle
+            import os
+            codebook_file = f"codebook_{d}_{bit_width}.pkl"
+            if os.path.exists(codebook_file):
+                with open(codebook_file, 'rb') as f:
+                    return pickle.load(f)
+        except Exception:
+            pass
 
-            n_centroids = 2 ** bit_width
-            centroids = np.linspace(-1, 1, n_centroids + 1)[1:-1]
+        # Compute using Lloyd-Max algorithm
+        centroids = self._compute_lloyd_max_centroids(d, n_centroids)
+        boundaries = self._compute_lloyd_max_boundaries(centroids, d)
 
-            def beta_distribution_pdf(x, d):
-                d = float(d)
-                norm_const = gamma(d / 2) / (np.sqrt(np.pi) * gamma((d - 1) / 2))
-                return norm_const * (1 - x**2)**((d - 3) / 2)
-
-            def compute_centroid(left, right, d):
-                pdf = lambda x: beta_distribution_pdf(x, d)
-                numerator, _ = quad(lambda x: x * pdf(x), left, right)
-                denominator, _ = quad(pdf, left, right)
-                return numerator / denominator
-
-            for _ in range(100):
-                boundaries = np.zeros(n_centroids - 1)
-                for i in range(n_centroids - 1):
-                    boundaries[i] = (centroids[i] + centroids[i + 1]) / 2
-
-                new_centroids = np.zeros(n_centroids)
-                for i in range(n_centroids):
-                    left = boundaries[i - 1] if i > 0 else -1
-                    right = boundaries[i] if i < n_centroids - 1 else 1
-                    new_centroids[i] = compute_centroid(left, right, d)
-
-                centroids = new_centroids
-
-            centroids, boundaries = centroids, boundaries
+        # Save to file for future use
+        import pickle
+        import os
+        codebook_file = f"codebook_{d}_{bit_width}.pkl"
+        os.makedirs(os.path.dirname(codebook_file) or '.', exist_ok=True)
+        with open(codebook_file, 'wb') as f:
+            pickle.dump((centroids, boundaries), f)
 
         return centroids, boundaries
+
+    def _compute_lloyd_max_centroids(self, d: int, n_centroids: int) -> np.ndarray:
+        """
+        Compute centroids using Lloyd-Max algorithm with proper initialization.
+
+        Parameters
+        ----------
+        d : int
+            Dimension of the space.
+        n_centroids : int
+            Number of centroids to compute.
+
+        Returns
+        -------
+        centroids : np.ndarray
+            Array of centroids.
+        """
+        # Initial centroids: evenly spaced in [-1, 1]
+        centroids = np.linspace(-1, 1, n_centroids)
+
+        # Precompute normalization constant for Beta distribution
+        from scipy.special import gamma
+        d_float = float(d)
+        norm_const = gamma(d_float / 2) / (np.sqrt(np.pi) * gamma((d_float - 1) / 2))
+
+        # Helper function for PDF
+        def pdf(x):
+            return norm_const * (1 - x**2)**((d_float - 3) / 2)
+
+        # Helper function for centroid computation
+        def compute_centroid(left, right):
+            # Numerator: integral of x * pdf(x)
+            numerator, _ = quad(lambda xx: xx * pdf(xx), left, right)
+            # Denominator: integral of pdf(x)
+            denominator, _ = quad(pdf, left, right)
+            return numerator / denominator
+
+        from scipy.integrate import quad
+
+        for iteration in range(100):
+            # Compute boundaries as midpoints
+            boundaries = (centroids[:-1] + centroids[1:]) / 2
+
+            # Compute new centroids
+            new_centroids = np.zeros(n_centroids)
+            for i in range(n_centroids):
+                left = boundaries[i - 1] if i > 0 else -1
+                right = boundaries[i] if i < n_centroids - 1 else 1
+                new_centroids[i] = compute_centroid(left, right)
+
+            # Check convergence
+            if np.max(np.abs(new_centroids - centroids)) < 1e-6:
+                centroids = new_centroids
+                break
+            centroids = new_centroids
+
+        return centroids
+
+    def _compute_lloyd_max_boundaries(self, centroids: np.ndarray, d: int) -> np.ndarray:
+        """
+        Compute decision boundaries as midpoints between centroids.
+
+        Parameters
+        ----------
+        centroids : np.ndarray
+            Array of centroids.
+        d : int
+            Dimension of the space.
+
+        Returns
+        -------
+        boundaries : np.ndarray
+            Array of decision boundaries.
+        """
+        n_centroids = len(centroids)
+        boundaries = (centroids[:-1] + centroids[1:]) / 2
+        return boundaries
 
     def _generate_rotation_matrix(self, d: int) -> np.ndarray:
         """
@@ -180,13 +245,12 @@ class TurboQuantMSE:
         elif x.ndim > 2:
             raise ValueError(f"Input x must be 1D or 2D, got {x.ndim}D")
 
-        # Apply rotation: y = Pi @ x
-        y = self.Pi @ x
+        # Apply rotation: y = x @ Pi.T
+        y = x @ self.Pi.T
 
         # Quantize each coordinate using searchsorted on boundaries
         indices = np.zeros_like(y, dtype=np.int8)
         for i in range(y.shape[0]):
-            # Find which region each coordinate falls into
             indices[i] = np.searchsorted(self.boundaries, y[i], side='right')
 
         # Convert to uint8 for bit_width <= 8
@@ -194,9 +258,9 @@ class TurboQuantMSE:
             indices = indices.astype(np.uint8)
 
         # Restore original shape
-        if original_shape == ():
+        if original_shape == (self.d,):
             indices = indices[0]
-        elif original_shape[0] == 1:
+        elif len(original_shape) == 2 and original_shape[0] == 1:
             indices = indices[0]
         else:
             indices = indices.reshape(original_shape)
@@ -228,8 +292,8 @@ class TurboQuantMSE:
         # Look up centroid values for each index
         centroids = self.centroids[idx]
 
-        # Apply inverse rotation: x_hat = Pi.T @ centroids
-        x_hat = self.Pi.T @ centroids
+        # Apply inverse rotation: x_hat = centroids @ Pi
+        x_hat = centroids @ self.Pi
 
         # Restore original shape
         if idx.shape[0] == 1:
