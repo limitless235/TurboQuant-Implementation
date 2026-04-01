@@ -11,3 +11,4 @@ build/
 *.npz
 *.pkl
 codebook_128_4.pkl
+*.DS_store
