@@ -218,7 +218,8 @@ class TurboQuantMSE:
         A = np.random.randn(d, d)
         Q, _ = np.linalg.qr(A)
         # Ensure determinant is +1 for proper rotation (not reflection)
-        if np.linalg.det(Q) < 0:
+        sign, _ = np.linalg.slogdet(Q)
+        if sign < 0:
             Q[:, 0] *= -1
         return Q
 

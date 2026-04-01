@@ -42,33 +42,24 @@ class QJL:
         # Generate random matrix S with i.i.d. N(0,1) entries
         self.S = np.random.randn(d, d)
 
+
     def quantize(self, r: np.ndarray) -> Tuple[np.ndarray, float]:
-        """
-        Quantize vector r using sign-based quantization.
-
-        Parameters
-        ----------
-        r : np.ndarray
-            Input vector of shape (d,).
-
-        Returns
-        -------
-        sign_bits : np.ndarray
-            Quantized signs of shape (d,), dtype int8 with values {-1, +1}.
-        gamma : float
-            L2 norm of the original vector r.
-        """
         r = np.asarray(r)
-        assert r.ndim == 1, f"Input r must be 1D, got {r.ndim}D"
-        assert r.shape[0] == self.d, f"Input r has wrong dimension: {r.shape[0]} vs {self.d}"
+        assert r.ndim == 1
+        assert r.shape[0] == self.d
 
-        # Compute sign of rotated vector
-        rotated = self.S @ r
-        sign_bits = np.sign(rotated).astype(np.int8)
-
-        # Store norm
         gamma = float(np.linalg.norm(r))
-
+        
+        # Normalize before rotation so sign bits encode direction only
+        # gamma carries the magnitude separately
+        if gamma > 1e-10:
+            r_normalized = r / gamma
+        else:
+            r_normalized = r
+        
+        rotated = self.S @ r_normalized
+        sign_bits = np.sign(rotated).astype(np.int8)
+        
         return sign_bits, gamma
 
     def dequantize(self, sign_bits: np.ndarray, gamma: float) -> np.ndarray:
@@ -91,9 +82,14 @@ class QJL:
         assert sign_bits.ndim == 1, f"Input sign_bits must be 1D, got {sign_bits.ndim}D"
         assert sign_bits.shape[0] == self.d, f"Input sign_bits has wrong dimension: {sign_bits.shape[0]} vs {self.d}"
         assert np.all(np.abs(sign_bits) == 1), "sign_bits must be {-1, +1}"
+        zeros = np.sum(sign_bits == 0)
+        if zeros > 0:
+            print(f"WARNING: {zeros} zero sign bits")
 
         # Apply inverse transform: sqrt(pi/2) / d * gamma * S.T @ sign_bits
         x_hat = np.sqrt(np.pi / 2) / self.d * gamma * (self.S.T @ sign_bits)
+
+
 
         return x_hat
 
@@ -123,6 +119,7 @@ def verify_unbiasedness(d: int, n_trials: int = 10000) -> Tuple[float, float, bo
     """
     qjl = QJL(d)
 
+
     # Generate random unit vectors
     x_raw = np.random.randn(d)
     x = x_raw / np.linalg.norm(x_raw)
@@ -136,26 +133,28 @@ def verify_unbiasedness(d: int, n_trials: int = 10000) -> Tuple[float, float, bo
     # Collect inner products over trials
     inner_products = []
     for _ in range(n_trials):
-        # Quantize x
-        sign_bits, gamma = qjl.quantize(x)
-
-        # Dequantize
-        x_hat = qjl.dequantize(sign_bits, gamma)
-
-        # Compute inner product with y
+        qjl_trial = QJL(d)  # fresh S each trial
+        sign_bits, gamma = qjl_trial.quantize(x)
+        x_hat = qjl_trial.dequantize(sign_bits, gamma)
         ip = float(np.dot(y, x_hat))
         inner_products.append(ip)
 
     inner_products = np.array(inner_products)
 
     # Estimate bias
-    estimated_bias = float(np.mean(inner_products) - true_inner_product)
+    estimated_bias=float(np.mean(inner_products) - true_inner_product)
+
 
     # Standard error
     std_error = np.std(inner_products) / np.sqrt(n_trials)
 
     # Check if bias is within 3 standard errors
     passed = abs(estimated_bias) <= 3 * std_error
+    # After computing inner_products:
+    print(f"  mean(x_hat): {np.mean([np.dot(y, qjl.dequantize(*qjl.quantize(x))) for _ in range(100)]):.4f}")
+    print(f"  true <y,x>:  {true_inner_product:.4f}")
+    print(f"  std_error:   {std_error:.6f}")
+    print(f"  |bias|/std:  {abs(estimated_bias)/std_error:.2f}")
 
     return estimated_bias, true_inner_product, passed
 
@@ -181,7 +180,7 @@ if __name__ == "__main__":
         print(f"d={d}: ||x||={np.linalg.norm(x):.6f}, ||x_hat||={np.linalg.norm(x_hat):.6f}")
 
         # Test verify_unbiasedness
-        estimated_bias, true_ip, passed = verify_unbiasedness(d, n_trials=1000)
+        estimated_bias, true_ip, passed = verify_unbiasedness(d, n_trials=10000)
         print(f"d={d}: estimated_bias={estimated_bias:.6f}, true_ip={true_ip:.6f}, passed={passed}")
 
     print("\nAll tests completed!")

@@ -255,6 +255,8 @@ class TurboQuantMSE:
         # Convert to uint8 for bit_width <= 8
         if self.bit_width <= 8:
             indices = indices.astype(np.uint8)
+        # Always cast to int32 for indexing safety
+        indices = indices.astype(np.int32)
 
         # Restore original shape
         if original_shape == (self.d,):
@@ -281,6 +283,7 @@ class TurboQuantMSE:
             Reconstructed vector(s) of same shape as idx.
         """
         idx = np.asarray(idx)
+        idx = idx.astype(np.int32)  # Ensure integer type for indexing
 
         # Ensure 2D for consistent processing
         if idx.ndim == 1:

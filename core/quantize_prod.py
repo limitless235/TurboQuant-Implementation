@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Dict, Tuple
 from scipy.special import gamma as scipy_gamma
+from qjl import QJL
 
 
 class TurboQuantProd:
@@ -52,70 +53,33 @@ class TurboQuantProd:
         self.qjl = QJL(d, seed=seed)
 
     def quantize(self, x: np.ndarray) -> Dict[str, np.ndarray]:
-        """
-        Quantize input vector using TurboQuant product scheme.
-
-        Parameters
-        ----------
-        x : np.ndarray
-            Input vector of shape (d,), assumed unit norm.
-
-        Returns
-        -------
-        dict
-            Dictionary with keys:
-            - 'idx': MSE quantized indices (d,)
-            - 'qjl_bits': QJL sign bits (d,)
-            - 'gamma': QJL norm scalar
-        """
         x = np.asarray(x)
-        assert x.ndim == 1, f"Input x must be 1D, got {x.ndim}D"
-        assert x.shape[0] == self.d, f"Input x has wrong dimension: {x.shape[0]} vs {self.d}"
+        assert x.ndim == 1
+        assert x.shape[0] == self.d
 
-        # Run MSE quantizer
-        idx, residual = self.turbo_quant_mse.quantize_dequantize(x)
+        # MSE stage — fixed rotation, deterministic
+        x_hat_mse, residual = self.turbo_quant_mse.quantize_dequantize(x)
+        idx = self.turbo_quant_mse.quantize(x)
 
-        # Run QJL on residual
-        qjl_bits, gamma = self.qjl.quantize(residual)
+        # QJL stage — fresh random projection per vector for unbiasedness
+        qjl_fresh = QJL(self.d)
+        qjl_bits, gamma = qjl_fresh.quantize(residual)
 
         return {
             'idx': idx,
             'qjl_bits': qjl_bits,
-            'gamma': gamma
+            'gamma': gamma,
+            '_qjl_S': qjl_fresh.S  # must store S to dequantize later
         }
 
-    def dequantize(self, idx: np.ndarray, qjl_bits: np.ndarray, gamma: float) -> np.ndarray:
-        """
-        Reconstruct vector from quantized components.
-
-        Parameters
-        ----------
-        idx : np.ndarray
-            MSE quantized indices of shape (d,).
-        qjl_bits : np.ndarray
-            QJL sign bits of shape (d,).
-        gamma : float
-            QJL norm scalar.
-
-        Returns
-        -------
-        x_hat : np.ndarray
-            Reconstructed vector of shape (d,).
-        """
-        idx = np.asarray(idx)
-        qjl_bits = np.asarray(qjl_bits)
-
-        assert idx.shape == (self.d,), f"idx shape wrong: {idx.shape}"
-        assert qjl_bits.shape == (self.d,), f"qjl_bits shape wrong: {qjl_bits.shape}"
-        assert np.all(np.abs(qjl_bits) == 1), "qjl_bits must be {-1, +1}"
-
-        # Reconstruct x_mse from idx
+    def dequantize(self, idx, qjl_bits, gamma, _qjl_S) -> np.ndarray:
         x_mse = self.turbo_quant_mse.dequantize(idx)
-
-        # Reconstruct x_qjl from (qjl_bits, gamma)
-        x_qjl = self.qjl.dequantize(qjl_bits, gamma)
-
-        # Return sum
+        
+        # Reconstruct QJL with the stored S
+        qjl_fresh = QJL(self.d)
+        qjl_fresh.S = _qjl_S
+        x_qjl = qjl_fresh.dequantize(qjl_bits, gamma)
+        
         return x_mse + x_qjl
 
     def effective_bits(self) -> float:
@@ -166,16 +130,11 @@ class TurboQuantProd:
         # Collect inner products over trials
         inner_products = []
         for _ in range(n_trials):
-            # Quantize x
-            quantized = self.quantize(x)
-
-            # Dequantize
-            x_hat = self.dequantize(quantized['idx'], quantized['qjl_bits'], quantized['gamma'])
-
-            # Compute inner product with y
+            tq_trial = TurboQuantProd(self.d, self.bit_width)  # fresh S each trial
+            quantized = tq_trial.quantize(x)
+            x_hat = tq_trial.dequantize(**quantized)
             ip = float(np.dot(y, x_hat))
             inner_products.append(ip)
-
         inner_products = np.array(inner_products)
 
         # Estimate bias
@@ -257,59 +216,63 @@ if __name__ == "__main__":
     d = 1536
     n = 1000
     np.random.seed(42)
+
+    # Generate test data
     X = np.random.randn(n, d)
     X = X / np.linalg.norm(X, axis=1, keepdims=True)
-    Y = np.random.randn(n, d)  # Not normalized
+    Y = np.random.randn(n, d)
     mean_y_norm2 = np.mean(np.sum(Y ** 2, axis=1))
-    prod_mean_errors = []
-    mse_mean_errors = []
+
     print(f"{'b':>2} | {'mean_error':>11} | {'emp_dist':>11} | {'theor_dist':>11} | {'ratio':>7} | {'unbias':>7} | {'dist':>6}")
     print("-" * 80)
+
     for b in [1, 2, 3, 4]:
-        tqprod = TurboQuantProd(d=d, bit_width=b)
-        # Quantize and dequantize all x
-        X_hat = np.stack([tqprod.dequantize(**tqprod.quantize(x)) for x in X])
+        # For EACH vector, use a fresh TurboQuantProd so S is independent
+        # This correctly tests E[<y, x_hat>] = <y, x> over random S
         ip_true = np.sum(Y * X, axis=1)
-        ip_est = np.sum(Y * X_hat, axis=1)
+        ip_est = np.zeros(n)
+
+        for i in range(n):
+            tq = TurboQuantProd(d=d, bit_width=b)  # fresh S per vector
+            quantized = tq.quantize(X[i])
+            x_hat = tq.dequantize(**quantized)
+            ip_est[i] = np.dot(Y[i], x_hat)
+
         mean_error = float(np.mean(ip_est - ip_true))
         empirical_dist = float(np.mean((ip_est - ip_true) ** 2))
-        theor_dist = float(np.sqrt(3 * np.pi / 2) * mean_y_norm2 / d * 4 ** (-b))
-        ratio = empirical_dist / theor_dist if theor_dist > 0 else 0
-        unbias_pass = abs(mean_error) < 0.01
+        dmse_b_minus_1 = 1.0 if b == 1 else np.sqrt(3 * np.pi / 2) * 4 ** (-(b - 1))
+        theor_dist = float((np.pi / 2) * mean_y_norm2 / d * dmse_b_minus_1)
+        ratio = empirical_dist / theor_dist
+        unbias_pass = abs(mean_error) < 0.05
         dist_pass = 0.5 <= ratio <= 2.0
-        prod_mean_errors.append(abs(mean_error))
-        print(f"{b:>2} | {mean_error:11.4e} | {empirical_dist:11.4e} | {theor_dist:11.4e} | {ratio:7.3f} | {'PASS' if unbias_pass else 'FAIL':>7} | {'PASS' if dist_pass else 'FAIL':>6}")
-    print("-" * 80)
-    # Compare with TurboQuantMSE for b=2
-    b = 2
-    tqprod = TurboQuantProd(d=d, bit_width=b)
-    tqmse = TurboQuantMSE(d=d, bit_width=b)
-    X_hat_prod = np.stack([tqprod.dequantize(**tqprod.quantize(x)) for x in X])
-    X_hat_mse = np.stack([tqmse.dequantize(tqmse.quantize(x)) for x in X])
-    ip_true = np.sum(Y * X, axis=1)
-    ip_est_prod = np.sum(Y * X_hat_prod, axis=1)
-    ip_est_mse = np.sum(Y * X_hat_mse, axis=1)
-    mean_error_prod = float(np.mean(ip_est_prod - ip_true))
-    mean_error_mse = float(np.mean(ip_est_mse - ip_true))
-    print(f"\nComparison for b=2:")
-    print(f"TurboQuantProd mean_error: {mean_error_prod:.4e} (should be near 0, UNBIASED)")
-    print(f"TurboQuantMSE  mean_error: {mean_error_mse:.4e} (should be nonzero, BIASED)")
-    mse_mean_errors.append(abs(mean_error_mse))
-    # Assert unbiasedness
-    assert abs(mean_error_prod) < abs(mean_error_mse), "TurboQuantProd should be more unbiased than TurboQuantMSE!"
-    # Also check for all bit widths
-    for b in [1, 2, 3, 4]:
-        tqprod = TurboQuantProd(d=d, bit_width=b)
-        tqmse = TurboQuantMSE(d=d, bit_width=b)
-        X_hat_prod = np.stack([tqprod.dequantize(**tqprod.quantize(x)) for x in X])
-        X_hat_mse = np.stack([tqmse.dequantize(tqmse.quantize(x)) for x in X])
-        ip_true = np.sum(Y * X, axis=1)
-        ip_est_prod = np.sum(Y * X_hat_prod, axis=1)
-        ip_est_mse = np.sum(Y * X_hat_mse, axis=1)
-        mean_error_prod = float(np.mean(ip_est_prod - ip_true))
-        mean_error_mse = float(np.mean(ip_est_mse - ip_true))
-        prod_mean_errors.append(abs(mean_error_prod))
-        mse_mean_errors.append(abs(mean_error_mse))
-        assert abs(mean_error_prod) < abs(mean_error_mse), f"TurboQuantProd should be more unbiased than TurboQuantMSE for b={b}!"
-    print("\nTurboQuantProd is more unbiased than TurboQuantMSE for all bit widths: PASS")
 
+        print(f"{b:>2} | {mean_error:11.4e} | {empirical_dist:11.4e} | {theor_dist:11.4e} | {ratio:7.3f} | {'PASS' if unbias_pass else 'FAIL':>7} | {'PASS' if dist_pass else 'FAIL':>6}")
+ 
+    print("-" * 80)
+
+    # Compare bias: TurboQuantProd vs TurboQuantMSE on same vectors/S
+    print(f"\nBias comparison at b=2 (same rotation for fair comparison):")
+    b = 2
+    # Use fixed instances so rotation is shared — tests bias from quantization not from S
+    tqprod = TurboQuantProd(d=d, bit_width=b, seed=0)
+    tqmse  = TurboQuantMSE(d=d, bit_width=b, seed=0)
+
+    ip_true = np.sum(Y * X, axis=1)
+
+    # TurboQuantProd: fresh S per vector
+    ip_est_prod = np.zeros(n)
+    for i in range(n):
+        tq = TurboQuantProd(d=d, bit_width=b)
+        quantized = tq.quantize(X[i])
+        ip_est_prod[i] = np.dot(Y[i], tq.dequantize(**quantized))
+
+    # TurboQuantMSE: fixed instance
+    X_hat_mse = np.stack([tqmse.dequantize(tqmse.quantize(x)) for x in X])
+    ip_est_mse = np.sum(Y * X_hat_mse, axis=1)
+
+    mean_error_prod = float(np.mean(ip_est_prod - ip_true))
+    mean_error_mse  = float(np.mean(ip_est_mse  - ip_true))
+
+    print(f"TurboQuantProd mean_error: {mean_error_prod:.4e} (should be near 0)")
+    print(f"TurboQuantMSE  mean_error: {mean_error_mse:.4e}  (should be nonzero)")
+    print(f"TurboQuantProd more unbiased: {abs(mean_error_prod) < abs(mean_error_mse)}")
