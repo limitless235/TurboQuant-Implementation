@@ -2,6 +2,7 @@ import numpy as np
 from typing import Dict, Tuple
 from scipy.special import gamma as scipy_gamma
 from qjl import QJL
+from quantize_mse import TurboQuantMSE
 
 
 class TurboQuantProd:
