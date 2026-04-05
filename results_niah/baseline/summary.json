@@ -1,0 +1,10 @@
+{
+  "mode": "baseline",
+  "bit_width": null,
+  "total_runs": 20,
+  "pass_count": 20,
+  "accuracy": 1.0,
+  "total_time_seconds": 248.26786136627197,
+  "model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "timestamp": "2026-04-02T00:54:45.161903"
+}

@@ -1,0 +1,20 @@
+{"context_length": 1000, "depth": 0.0, "success": true, "model_response": "The special secret code is 'BANANA-77'. = Robert Boulter = Robert", "time_seconds": 4.964722156524658, "cache_mse": null}
+{"context_length": 1000, "depth": 0.25, "success": true, "model_response": "The special secret code is 'BANANA-77'. and Donkey Punch directed by Ol", "time_seconds": 5.014722108840942, "cache_mse": null}
+{"context_length": 1000, "depth": 0.5, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 5.5569422245025635, "cache_mse": null}
+{"context_length": 1000, "depth": 0.75, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 4.620543956756592, "cache_mse": null}
+{"context_length": 1000, "depth": 1.0, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 3.666532039642334, "cache_mse": null}
+{"context_length": 2000, "depth": 0.0, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 6.3163487911224365, "cache_mse": null}
+{"context_length": 2000, "depth": 0.25, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 6.299470901489258, "cache_mse": null}
+{"context_length": 2000, "depth": 0.5, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 6.212464809417725, "cache_mse": null}
+{"context_length": 2000, "depth": 0.75, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 5.844288110733032, "cache_mse": null}
+{"context_length": 2000, "depth": 1.0, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 6.531299114227295, "cache_mse": null}
+{"context_length": 4000, "depth": 0.0, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 11.423650026321411, "cache_mse": null}
+{"context_length": 4000, "depth": 0.25, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 14.60453486442566, "cache_mse": null}
+{"context_length": 4000, "depth": 0.5, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 13.105233192443848, "cache_mse": null}
+{"context_length": 4000, "depth": 0.75, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 12.178831100463867, "cache_mse": null}
+{"context_length": 4000, "depth": 1.0, "success": true, "model_response": "BANANA-77.", "time_seconds": 12.369852781295776, "cache_mse": null}
+{"context_length": 8000, "depth": 0.0, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 25.06614899635315, "cache_mse": null}
+{"context_length": 8000, "depth": 0.25, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 26.944849967956543, "cache_mse": null}
+{"context_length": 8000, "depth": 0.5, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 24.181135177612305, "cache_mse": null}
+{"context_length": 8000, "depth": 0.75, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 24.537256002426147, "cache_mse": null}
+{"context_length": 8000, "depth": 1.0, "success": true, "model_response": "The special secret code is 'BANANA-77'.", "time_seconds": 28.82903504371643, "cache_mse": null}
