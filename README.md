@@ -20,7 +20,7 @@ In benchmarking with Qwen2.5-1.5B, this approach successfully passed the Needle 
 
 ##  Repository Structure & File Explanations
 
-### 🛠️ Core Algorithms (`/core`)
+###  Core Algorithms (`/core`)
 This directory contains the pure mathematical primitives of the TurboQuant paper, entirely framework-agnostic.
 
 * **`quantize_mse.py`**: Implements the base `TurboQuantMSE` algorithm. It applies random rotation and quantizes coordinates using the Max-Lloyd algorithm to minimize Mean Squared Error.
@@ -55,7 +55,7 @@ Stores the raw telemetry from benchmark runs.
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 * Apple Silicon Mac (M1/M2/M3/M4)
